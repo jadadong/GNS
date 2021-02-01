@@ -164,7 +164,9 @@ def run(args, device, data):
     train_nid, val_nid, test_nid, in_feats, labels, n_classes, g = data
     number_of_nodes = g.number_of_nodes()
     in_degree_all_nodes = g.in_degrees()
-    avd = sum(in_degree_all_nodes)/number_of_nodes
+    prob = np.divide(in_degree_all_nodes, sum(in_degree_all_nodes))
+    avd = int(sum(in_degree_all_nodes)//number_of_nodes)
+    in_degree_all_nodes = in_degree_all_nodes.to(device)
     # Define model and optimizer
     # added by jialin, additional paramenters
     model = SAGE(in_feats, args.num_hidden, n_classes, args.num_layers, F.relu, args.dropout,
@@ -187,7 +189,6 @@ def run(args, device, data):
                 # initial the buffer
                 num_nodes = g.num_nodes()
                 num_sample_nodes = int(args.buffer_size * num_nodes)
-                prob = np.divide(in_degree_all_nodes, sum(in_degree_all_nodes))
                 args.buffer = np.random.choice(num_nodes, num_sample_nodes, replace=False,
                                            p=prob)
             sampler = dgl.dataloading.MultiLayerNeighborSampler(
@@ -216,18 +217,17 @@ def run(args, device, data):
             if args.buffer_size != 0 and args.IS == 1:
                 fanouts = [int(fanout) for fanout in args.fan_out.split(',')]
                 batchsize = blocks[-1].num_dst_nodes()
-                A = th.ones(batchsize) * (batchsize/number_of_nodes)/args.buffer_size
-                A = th.reshape(A.type(th.FloatTensor), (batchsize, 1))
+                A = th.ones(batchsize, 1, dtype=th.float32, device=device) * (batchsize/number_of_nodes)/args.buffer_size
                 for layer, block in reversed(list(enumerate(blocks))):
                     if layer ==0:
                         break
-                    dst_id = block.dstdata.__getitem__('_ID')
-                    srcnode_id, dstnode_id = block.find_edges(th.tensor([i_dex for i_dex in range(block.num_edges())],dtype=th.int32).to(device) )
-                    i_i = th.LongTensor([srcnode_id.cpu().numpy(), dstnode_id.cpu().numpy()])
-                    value = th.div(fanouts[layer] * th.ones(block.num_edges()),
-                                   in_degree_all_nodes[dst_id[dstnode_id.cpu().numpy()].cpu().numpy()])
+                    dst_id = block.dstdata.__getitem__('_ID').long()
+                    srcnode_id, dstnode_id = block.edges()
+                    i_i = th.stack([srcnode_id.long(), dstnode_id.long()])
+                    value = th.div(fanouts[layer] * th.ones(block.num_edges(), device=device),
+                                   in_degree_all_nodes[dst_id[dstnode_id.long()]])
                     value[value > 1] = 1
-                    v = th.FloatTensor(value.numpy())
+                    v = value
                     A_temp = th.sparse.FloatTensor(i_i, v, th.Size([block.num_src_nodes(), block.num_dst_nodes()]))
                     A = th.sparse.mm(A_temp, A)
                     
