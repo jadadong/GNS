@@ -22,7 +22,6 @@ import matplotlib.pyplot as plt
 
 epsilon = 1 - math.log(2)
 
-
 # more parameters are needed to contruct SAGE
 class SAGE(nn.Module):
     def __init__(self,
@@ -183,16 +182,20 @@ def run(args, device, data):
     keys = ['Loss', 'Train Acc', 'Test Acc', 'Eval Acc']
     history = dict(zip(keys, ([] for _ in keys)))
     fanout= [int(fanout) for fanout in args.fan_out.split(',')]
+    min_fanout = max_fanout = fanout
+    # We want to keep all nodes in the cache in the input layer.
+    min_fanout[0] = 0
+    max_fanout[0] = -1
+    feats = g.ndata['feat']
+    buffer_nodes = None
     for epoch in range(args.num_epochs):
         if epoch % args.buffer_rs_every == 0:
             if args.buffer_size != 0:
                 # initial the buffer
                 num_nodes = g.num_nodes()
                 num_sample_nodes = int(args.buffer_size * num_nodes)
-                args.buffer = np.random.choice(num_nodes, num_sample_nodes, replace=False,
-                                           p=prob)
-            sampler = dgl.dataloading.MultiLayerNeighborSampler(
-                fanout, args.buffer, args.buffer_size)
+                buffer_nodes = np.random.choice(num_nodes, num_sample_nodes, replace=False, p=prob)
+            sampler = dgl.dataloading.MultiLayerNeighborSampler(min_fanout, max_fanout, buffer_nodes, args.buffer_size, g)
             dataloader = dgl.dataloading.NodeDataLoader(
                 g,
                 train_nid,
@@ -203,7 +206,6 @@ def run(args, device, data):
                 num_workers=args.num_workers)
 
         tic = time.time()
-
 
         # Loop over the dataloader to sample the computation dependency graph as a list of
         # blocks.
@@ -230,20 +232,15 @@ def run(args, device, data):
                     v = value
                     A_temp = th.sparse.FloatTensor(i_i, v, th.Size([block.num_src_nodes(), block.num_dst_nodes()]))
                     A = th.sparse.mm(A_temp, A)
-                    
                     A[A>1/(avd*args.buffer_size)]=1/(avd*args.buffer_size)
-                   
                     A[A==0]=1
   
             # Load the input features as well as output labels
             batch_inputs, batch_labels = load_subtensor(g, labels, seeds, input_nodes, device)
             if args.buffer_size != 0 and args.IS == 1:
-                
                 batch_pred  = model(blocks, batch_inputs,A.to(device))
             else:
-                 
-                 batch_pred = model(blocks, batch_inputs)
-                 
+                batch_pred = model(blocks, batch_inputs)
 
             loss = cross_entropy(batch_pred, batch_labels)
             optimizer.zero_grad()
@@ -326,7 +323,6 @@ if __name__ == '__main__':
     argparser.add_argument('--save-pred', type=str, default='')
     argparser.add_argument('--wd', type=float, default=0)
     argparser.add_argument('--buffer-size', type=float, default=0.01)
-    argparser.add_argument('--buffer', type=np.ndarray, default=None)
     argparser.add_argument('--buffer_rs-every', type=int, default=1)
     argparser.add_argument('--IS', type=int, default=1)
     args = argparser.parse_args()
