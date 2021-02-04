@@ -19,6 +19,7 @@ import traceback
 from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
 import json
 import matplotlib.pyplot as plt
+from pyinstrument import Profiler
 
 epsilon = 1 - math.log(2)
 
@@ -188,6 +189,8 @@ def run(args, device, data):
     max_fanout[0] = -1
     feats = g.ndata['feat']
     buffer_nodes = None
+    profiler = Profiler()
+    profiler.start()
     for epoch in range(args.num_epochs):
         if epoch % args.buffer_rs_every == 0:
             if args.buffer_size != 0:
@@ -274,6 +277,8 @@ def run(args, device, data):
             history['Test Acc'].append(test_acc)
             history['Eval Acc'].append(eval_acc)
 
+    profiler.stop()
+    print(profiler.output_text(unicode=True, color=True))
     print('Avg epoch time: {}'.format(avg / (epoch - 4)))
     epochs = range(args.num_epochs)
     plt.figure(1)
