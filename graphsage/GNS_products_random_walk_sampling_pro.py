@@ -221,7 +221,7 @@ def run(args, device, data):
                 args.buffer = np.random.choice(num_nodes, num_sample_nodes, replace=False,p=pro)
 #                args.buffer = np.random.permutation(num_nodes)[:num_sample_nodes]
             sampler = dgl.dataloading.MultiLayerNeighborSampler(
-                [1,1,1],[-1,100,100], args.buffer, args.buffer_size,g)
+                [1,5,10],[-1,10,15], args.buffer, args.buffer_size,g)
             dataloader = dgl.dataloading.NodeDataLoader(
                 g,
                 train_nid,
@@ -270,7 +270,7 @@ def run(args, device, data):
             avg += toc - tic
         if epoch % args.eval_every == 0:
             sampler_test = dgl.dataloading.MultiLayerNeighborSampler(
-                                [1,1,1],[1000,1000,1000], args.buffer, args.buffer_size,g)
+                [1,5,10],[-1,10,15], args.buffer, args.buffer_size,g)
 
             test_dataloader = dgl.dataloading.NodeDataLoader(
                 g,
