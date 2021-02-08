@@ -164,7 +164,25 @@ def run(args, device, data):
     train_nid, val_nid, test_nid, in_feats, labels, n_classes, g = data
     number_of_nodes = g.number_of_nodes()
     in_degree_all_nodes = g.in_degrees()
-    prob = np.divide(in_degree_all_nodes, sum(in_degree_all_nodes))
+
+    print('get cache sampling probability')
+    if 'prob' not in g.ndata:
+        prob = np.divide(in_degree_all_nodes, sum(in_degree_all_nodes))
+    else:
+        prob = g.ndata['prob'].numpy()
+
+    # Init
+    #prob = th.zeros(number_of_nodes, 1)
+    #prob[train_nid] = 1 / len(train_nid)
+    #deg = g.in_degrees().reshape(number_of_nodes, 1)
+    #for _ in range(args.num_layers):
+    #    g.ndata['p'] = prob / deg
+    #    g.update_all(fn.copy_u('p', 'm'), fn.sum('m', 'p'))
+    #    prob = g.ndata['p'] + prob
+    #    prob = prob / th.sum(prob)
+    #prob = np.squeeze(prob.numpy())
+
+    print('create the model')
     avd = int(sum(in_degree_all_nodes)//number_of_nodes)
     in_degree_all_nodes = in_degree_all_nodes.to(device)
     # Define model and optimizer
@@ -193,6 +211,7 @@ def run(args, device, data):
     buffer_nodes = None
     profiler = Profiler()
     profiler.start()
+    print('start training')
     for epoch in range(args.num_epochs):
         if epoch % args.buffer_rs_every == 0:
             if args.buffer_size != 0:
@@ -242,6 +261,7 @@ def run(args, device, data):
   
             # Load the input features as well as output labels
             batch_inputs, batch_labels = load_subtensor(g, labels, seeds, input_nodes, device)
+            batch_labels = batch_labels.long()
             if args.buffer_size != 0 and args.IS == 1:
                 batch_pred  = model(blocks, batch_inputs,A.to(device))
             else:
@@ -339,17 +359,31 @@ if __name__ == '__main__':
     else:
         device = th.device('cpu')
 
-    # load reddit data
-    data = DglNodePropPredDataset(name="ogbn-products")
-    splitted_idx = data.get_idx_split()
-    train_idx, val_idx, test_idx = splitted_idx['train'], splitted_idx['valid'], splitted_idx['test']
-    graph, labels = data[0]
+    # load graph
+    if '.dgl' not in args.dataset:
+        print('load graph from OGB.')
+        data = DglNodePropPredDataset(name=args.dataset)
+        splitted_idx = data.get_idx_split()
+        train_idx, val_idx, test_idx = splitted_idx['train'], splitted_idx['valid'], splitted_idx['test']
+        graph, labels = data[0]
+        graph.create_formats_()
+    else:
+        print('load a prepared graph')
+        data = dgl.load_graphs(args.dataset)[0]
+        graph = data[0]
+        labels = graph.ndata['label']
+        train_idx = th.nonzero(graph.ndata['train_mask'], as_tuple=True)[0]
+        val_idx = th.nonzero(graph.ndata['val_mask'], as_tuple=True)[0]
+        test_idx = th.nonzero(graph.ndata['test_mask'], as_tuple=True)[0]
 
     in_feats = graph.ndata['feat'].shape[1]
-    n_classes = (labels.max() + 1).item()
-    graph.create_formats_()
+    #n_classes = (labels.max() + 1).item()
+    n_classes = len(th.unique(labels[th.logical_not(th.isnan(labels))]))
     # Pack data
     data = train_idx, val_idx, test_idx, in_feats, labels, n_classes, graph
+    print('|V|: {}, |E|: {}, #train: {}, #val: {}, #test: {}, #classes: {}'.format(
+        graph.number_of_nodes(), graph.number_of_edges(), len(train_idx), len(val_idx), len(test_idx),
+        n_classes))
 
     # Run 1 times
     test_accs = []
