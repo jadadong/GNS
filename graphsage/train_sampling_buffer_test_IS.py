@@ -183,10 +183,12 @@ def run(args, device, data):
     keys = ['Loss', 'Train Acc', 'Test Acc', 'Eval Acc']
     history = dict(zip(keys, ([] for _ in keys)))
     fanout= [int(fanout) for fanout in args.fan_out.split(',')]
-    min_fanout = max_fanout = fanout
+    min_fanout = [f for f in fanout]
+    max_fanout = [f for f in fanout]
     # We want to keep all nodes in the cache in the input layer.
-    min_fanout[0] = 0
-    max_fanout[0] = -1
+    if args.buffer_size != 0:
+        min_fanout[0] = 0
+        max_fanout[0] = 10
     feats = g.ndata['feat']
     buffer_nodes = None
     profiler = Profiler()
