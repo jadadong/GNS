@@ -21,6 +21,7 @@ import json
 import matplotlib.pyplot as plt
 import pdb
 from sklearn.metrics import f1_score
+from pyinstrument import Profiler
 epsilon = 1 - math.log(2)
 
 
@@ -174,6 +175,7 @@ def run(args, device, data):
     train_nid, val_nid, test_nid, in_feats, labels, n_classes, g = data
     number_of_nodes = g.number_of_nodes()
     in_degree_all_nodes = g.in_degrees()
+    prob = np.divide(in_degree_all_nodes, sum(in_degree_all_nodes))
     # Define model and optimizer
     # added by jialin, additional paramenters
     model = SAGE(in_feats, args.num_hidden, n_classes, args.num_layers, F.relu, args.dropout,
@@ -190,6 +192,16 @@ def run(args, device, data):
     keys = ['Loss', 'Train Acc', 'Test Acc', 'Eval Acc']
     history = dict(zip(keys, ([] for _ in keys)))
     fanout= [int(fanout) for fanout in args.fan_out.split(',')]
+    min_fanout = [1,5,5]
+    max_fanout = [f for f in fanout]
+    # We want to keep all nodes in the cache in the input layer.
+    if args.buffer_size != 0:
+        min_fanout[0] = 0
+        max_fanout[0] = 10
+    feats = g.ndata['feat']
+    buffer_nodes = None
+    profiler = Profiler()
+    profiler.start()
     print("train")
 #    sampler_test = dgl.dataloading.MultiLayerNeighborSampler(
 #                fanout, None, 0)
@@ -218,11 +230,8 @@ def run(args, device, data):
                 # initial the buffer
                 num_nodes = g.num_nodes()
                 num_sample_nodes = int(args.buffer_size * num_nodes)
-                prob = np.divide(in_degree_all_nodes, sum(in_degree_all_nodes))
-                args.buffer = np.random.choice(num_nodes, num_sample_nodes, replace=False,
-                                           p=prob)
-            sampler = dgl.dataloading.MultiLayerNeighborSampler(
-                                [0,5,10],[-1,10,15], args.buffer, args.buffer_size,g)
+                buffer_nodes = np.random.choice(num_nodes, num_sample_nodes, replace=False, p=prob)
+            sampler = dgl.dataloading.MultiLayerNeighborSampler(min_fanout, max_fanout, buffer_nodes, args.buffer_size, g)
             dataloader = dgl.dataloading.NodeDataLoader(
                 g,
                 train_nid,
@@ -274,8 +283,7 @@ def run(args, device, data):
             avg += toc - tic
         if epoch % args.eval_every == 0:#and epoch != 0:
             
-            sampler_test = dgl.dataloading.MultiLayerNeighborSampler(
-                                                [5,10,15],[-1,10,15], args.buffer, args.buffer_size,g)
+            sampler_test = dgl.dataloading.MultiLayerNeighborSampler(min_fanout, max_fanout, buffer_nodes, args.buffer_size, g)
             dataloader_test = dgl.dataloading.NodeDataLoader(
                 g,
                 test_nid,
@@ -378,6 +386,10 @@ if __name__ == '__main__':
 
     # Run 1 times
     test_accs = []
+    for i in range(1):
+        test_accs.append(run(args, device, data))
+        print('Average test accuracy:', np.mean(test_accs), '±', np.std(test_accs))
+
     for i in range(1):
         test_accs.append(run(args, device, data))
         print('Average test accuracy:', np.mean(test_accs), '±', np.std(test_accs))
