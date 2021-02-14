@@ -94,8 +94,8 @@ class SAGE(nn.Module):
                 g,
                 th.arange(g.number_of_nodes()),
                 sampler,
-                batch_size=args.batch_size,
-                shuffle=True,
+                batch_size=args.batch_size * 10,
+                shuffle=False,
                 drop_last=False,
                 num_workers=args.num_workers)
 
@@ -142,11 +142,11 @@ def evaluate(model, g, labels, val_nid, test_nid, batch_size, device):
     return compute_acc(pred[val_nid], labels[val_nid]), compute_acc(pred[test_nid], labels[test_nid]), pred
 
 
-def load_subtensor(g, labels, seeds, input_nodes, device):
+def load_subtensor(feats, labels, seeds, input_nodes, device):
     """
     Copys features and labels of a set of nodes onto GPU.
     """
-    batch_inputs = g.ndata['feat'][input_nodes].to(device)
+    batch_inputs = feats[input_nodes].to(device)
     batch_labels = labels[seeds].to(device)
     return batch_inputs, batch_labels
 
@@ -155,6 +155,41 @@ def cross_entropy(x, labels):
     y = F.cross_entropy(x, labels[:, 0], reduction="none")
     y = th.log(epsilon + y) - math.log(epsilon)
     return th.mean(y)
+
+class CachedData:
+    '''Cache part of the data
+
+    This class caches a small portion of the data and uses the cached data
+    to accelerate the data movement to GPU.
+
+    Parameters
+    ----------
+    node_data : tensor
+        The actual node data we want to move to GPU.
+    buffer_nodes : tensor
+        The node IDs that we like to cache in GPU.
+    device : device
+        The device where we store cached data.
+    '''
+    def __init__(self, node_data, buffer_nodes, device):
+        num_nodes = node_data.shape[0]
+        # Let's construct a vector that stores the location of the cached data.
+        # If a node is cached, the corresponding element in the vector stores the location in the cache.
+        # If a node is not cached, the element points to the end of the cache.
+        self.cached_locs = th.ones(num_nodes, dtype=th.int32, device=device) * len(buffer_nodes)
+        self.cached_locs[buffer_nodes] = th.arange(len(buffer_nodes), dtype=th.int32, device=device)
+        # Let's construct the cache. The last row in the cache doesn't contain valid data.
+        self.cache_data = th.zeros(len(buffer_nodes) + 1, node_data.shape[1], dtype=node_data.dtype, device=device)
+        self.cache_data[:len(buffer_nodes)] = node_data[buffer_nodes].to(device)
+        self.invalid_loc = len(buffer_nodes)
+        self.node_data = node_data
+
+    def __getitem__(self, nids):
+        locs = self.cached_locs[nids].long()
+        data = self.cache_data[locs]
+        out_cache_nids = nids[locs == self.invalid_loc]
+        data[locs == self.invalid_loc] = self.node_data[out_cache_nids].to(self.cache_data.device)
+        return data
 
 
 #### Entry point
@@ -219,6 +254,7 @@ def run(args, device, data):
                 num_nodes = g.num_nodes()
                 num_sample_nodes = int(args.buffer_size * num_nodes)
                 buffer_nodes = np.random.choice(num_nodes, num_sample_nodes, replace=False, p=prob)
+                cached_data = CachedData(feats, buffer_nodes, device)
             sampler = dgl.dataloading.MultiLayerNeighborSampler(min_fanout, max_fanout, buffer_nodes, args.buffer_size, g)
             dataloader = dgl.dataloading.NodeDataLoader(
                 g,
@@ -260,7 +296,7 @@ def run(args, device, data):
                     A[A==0]=1
   
             # Load the input features as well as output labels
-            batch_inputs, batch_labels = load_subtensor(g, labels, seeds, input_nodes, device)
+            batch_inputs, batch_labels = load_subtensor(cached_data, labels, seeds, input_nodes, device)
             batch_labels = batch_labels.long()
             if args.buffer_size != 0 and args.IS == 1:
                 batch_pred  = model(blocks, batch_inputs,A.to(device))
