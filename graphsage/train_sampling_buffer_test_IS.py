@@ -20,6 +20,7 @@ from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
 import json
 import matplotlib.pyplot as plt
 from pyinstrument import Profiler
+import sklearn.metrics as skm
 
 epsilon = 1 - math.log(2)
 
@@ -115,13 +116,21 @@ class SAGE(nn.Module):
         return y
 
 
-def compute_acc(pred, labels):
+def compute_acc1(pred, labels):
     """
     Compute the accuracy of prediction given the labels.
     """
     evaluator = Evaluator(name="ogbn-arxiv")
 
     return evaluator.eval({"y_pred": pred.argmax(dim=-1, keepdim=True), "y_true": labels})["acc"]
+
+def compute_acc(logits, labels):
+    multilabel = len(labels.shape) > 1 and labels.shape[-1] > 1
+    if multilabel:
+        return skm.average_precision_score(labels.detach().cpu().numpy(),
+                logits.detach().cpu().numpy())
+    else:
+        return compute_acc1(logits, labels)
 
 
 def evaluate(model, g, labels, val_nid, test_nid, batch_size, device):
@@ -194,7 +203,6 @@ class CachedData:
 
 #### Entry point
 def run(args, device, data):
-   
     # added by jialin, additional paramenters
     train_nid, val_nid, test_nid, in_feats, labels, n_classes, g = data
     number_of_nodes = g.number_of_nodes()
@@ -228,6 +236,14 @@ def run(args, device, data):
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
 
+    multilabel = len(labels.shape) > 1 and labels.shape[-1] > 1
+    if multilabel:
+        loss_func = nn.BCEWithLogitsLoss()
+        loss_func.to(device)
+    else:
+        loss_func = cross_entropy
+        #loss_func = nn.CrossEntropyLoss()
+
     # Training loop
     avg = 0
     iter_tput = []
@@ -244,10 +260,10 @@ def run(args, device, data):
         max_fanout[0] = 10
     feats = g.ndata['feat']
     buffer_nodes = None
-    profiler = Profiler()
-    profiler.start()
     print('start training')
     for epoch in range(args.num_epochs):
+        profiler = Profiler()
+        profiler.start()
         if epoch % args.buffer_rs_every == 0:
             if args.buffer_size != 0:
                 # initial the buffer
@@ -269,7 +285,9 @@ def run(args, device, data):
 
         # Loop over the dataloader to sample the computation dependency graph as a list of
         # blocks.
+        num_batches = 0
         for step, (input_nodes, seeds, blocks) in enumerate(dataloader):
+            num_batches += 1
             tic_step = time.time()
 
             # copy block to gpu
@@ -297,13 +315,13 @@ def run(args, device, data):
   
             # Load the input features as well as output labels
             batch_inputs, batch_labels = load_subtensor(cached_data, labels, seeds, input_nodes, device)
-            batch_labels = batch_labels.long()
+            batch_labels = batch_labels.float() if multilabel else batch_labels.long()
             if args.buffer_size != 0 and args.IS == 1:
                 batch_pred  = model(blocks, batch_inputs,A.to(device))
             else:
                 batch_pred = model(blocks, batch_inputs)
 
-            loss = cross_entropy(batch_pred, batch_labels)
+            loss = loss_func(batch_pred, batch_labels)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -315,12 +333,14 @@ def run(args, device, data):
                 print(
                     'Epoch {:05d} | Step {:05d} | Loss {:.4f} | Train Acc {:.4f} | Speed (samples/sec) {:.4f} | GPU {:.1f} MiB'.format(
                         epoch, step, loss.item(), acc, np.mean(iter_tput[3:]), gpu_mem_alloc))
+        profiler.stop()
+        print(profiler.output_text(unicode=True, color=True))
 
         history['Loss'].append(loss.item())
         history['Train Acc'].append(acc)
 
         toc = time.time()
-        print('Epoch Time(s): {:.4f}'.format(toc - tic))
+        print('Epoch Time(s): {:.4f}, #iterations: {}'.format(toc - tic, num_batches))
         if epoch >= 5:
             avg += toc - tic
         if epoch % args.eval_every == 0 and epoch != 0:
@@ -335,8 +355,6 @@ def run(args, device, data):
             history['Test Acc'].append(test_acc)
             history['Eval Acc'].append(eval_acc)
 
-    profiler.stop()
-    print(profiler.output_text(unicode=True, color=True))
     print('Avg epoch time: {}'.format(avg / (epoch - 4)))
     epochs = range(args.num_epochs)
     plt.figure(1)
@@ -403,18 +421,31 @@ if __name__ == '__main__':
         train_idx, val_idx, test_idx = splitted_idx['train'], splitted_idx['valid'], splitted_idx['test']
         graph, labels = data[0]
         graph.create_formats_()
+        n_classes = len(th.unique(labels[th.logical_not(th.isnan(labels))]))
     else:
         print('load a prepared graph')
         data = dgl.load_graphs(args.dataset)[0]
         graph = data[0]
-        labels = graph.ndata['label']
-        train_idx = th.nonzero(graph.ndata['train_mask'], as_tuple=True)[0]
-        val_idx = th.nonzero(graph.ndata['val_mask'], as_tuple=True)[0]
-        test_idx = th.nonzero(graph.ndata['test_mask'], as_tuple=True)[0]
+        graph = graph.formats(['csr', 'csc'])
+        print('create csr and csc')
+        if 'oag' in args.dataset:
+            labels = graph.ndata['field']
+            graph.ndata['feat'] = graph.ndata['emb']
+            label_sum = labels.sum(1)
+            valid_labal_idx = th.nonzero(label_sum > 0, as_tuple=True)[0]
+            train_size = int(len(valid_labal_idx) * 0.43)
+            val_size = int(len(valid_labal_idx) * 0.05)
+            test_size = len(valid_labal_idx) - train_size - val_size
+            train_idx, val_idx, test_idx = valid_labal_idx[th.randperm(len(valid_labal_idx))].split([train_size, val_size, test_size])
+            n_classes = labels.shape[1]
+        else:
+            labels = graph.ndata['label']
+            train_idx = th.nonzero(graph.ndata['train_mask'], as_tuple=True)[0]
+            val_idx = th.nonzero(graph.ndata['val_mask'], as_tuple=True)[0]
+            test_idx = th.nonzero(graph.ndata['test_mask'], as_tuple=True)[0]
+            n_classes = len(th.unique(labels[th.logical_not(th.isnan(labels))]))
 
     in_feats = graph.ndata['feat'].shape[1]
-    #n_classes = (labels.max() + 1).item()
-    n_classes = len(th.unique(labels[th.logical_not(th.isnan(labels))]))
     # Pack data
     data = train_idx, val_idx, test_idx, in_feats, labels, n_classes, graph
     print('|V|: {}, |E|: {}, #train: {}, #val: {}, #test: {}, #classes: {}'.format(
