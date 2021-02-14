@@ -132,24 +132,86 @@ def compute_acc(logits, labels):
     else:
         return compute_acc1(logits, labels)
 
+class FindBestEvaluator:
+    def __init__(self, fanout):
+        self.fanout = fanout
+        self.best_val_acc = 0
+        self.best_test_acc = 0
 
-def evaluate(model, g, labels, val_nid, test_nid, batch_size, device):
-    """
-    Evaluate the model on the validation set specified by ``val_mask``.
-    g : The entire graph.
-    inputs : The features of all the nodes.
-    labels : The labels of all the nodes.
-    val_mask : A 0-1 mask indicating which nodes do we actually compute the accuracy for.
-    batch_size : Number of nodes to compute at the same time.
-    device : The GPU device to evaluate on.
-    """
-    model.eval()
-    with th.no_grad():
-        inputs = g.ndata['feat']
-        pred = model.inference(g, inputs, batch_size, device)
-    model.train()
-    return compute_acc(pred[val_nid], labels[val_nid]), compute_acc(pred[test_nid], labels[test_nid]), pred
+    def full_evaluate(self, model, g, labels, val_nid, test_nid, batch_size, device):
+        """
+        Evaluate the model on the validation set specified by ``val_mask``.
+        g : The entire graph.
+        inputs : The features of all the nodes.
+        labels : The labels of all the nodes.
+        val_mask : A 0-1 mask indicating which nodes do we actually compute the accuracy for.
+        batch_size : Number of nodes to compute at the same time.
+        device : The GPU device to evaluate on.
+        """
+        model.eval()
+        with th.no_grad():
+            inputs = g.ndata['feat']
+            pred = model.inference(g, inputs, batch_size, device)
+        model.train()
+        return compute_acc(pred[val_nid], labels[val_nid]), compute_acc(pred[test_nid], labels[test_nid])
 
+    def sample_evaluate(self, model, g, labels, val_nid, test_nid, batch_size, fanout, device):
+        model.eval()
+        multilabel = len(labels.shape) > 1 and labels.shape[-1] > 1
+        feats = g.ndata['feat']
+
+        val_accs = []
+        sampler = dgl.dataloading.MultiLayerNeighborSampler(fanout, fanout, None, 0, g)
+        dataloader = dgl.dataloading.NodeDataLoader(g, val_nid,
+                                                    sampler,
+                                                    batch_size=args.eval_batch_size,
+                                                    shuffle=False,
+                                                    drop_last=False,
+                                                    num_workers=4)
+        with th.no_grad():
+            for step, (input_nodes, seeds, blocks) in enumerate(dataloader):
+                # copy block to gpu
+                blocks = [blk.int().to(device) for blk in blocks]
+                # Load the input features as well as output labels
+                batch_inputs, batch_labels = load_subtensor(feats, labels, seeds, input_nodes, device)
+                batch_labels = batch_labels.float() if multilabel else batch_labels.long()
+                batch_pred = model(blocks, batch_inputs)
+                acc = compute_acc(batch_pred, batch_labels)
+                val_accs.append(acc)
+
+        test_accs = []
+        sampler = dgl.dataloading.MultiLayerNeighborSampler(fanout, fanout, None, 0, g)
+        dataloader = dgl.dataloading.NodeDataLoader(g, test_nid,
+                                                    sampler,
+                                                    batch_size=args.eval_batch_size,
+                                                    shuffle=False,
+                                                    drop_last=False,
+                                                    num_workers=4)
+        with th.no_grad():
+            for step, (input_nodes, seeds, blocks) in enumerate(dataloader):
+                # copy block to gpu
+                blocks = [blk.int().to(device) for blk in blocks]
+                # Load the input features as well as output labels
+                batch_inputs, batch_labels = load_subtensor(feats, labels, seeds, input_nodes, device)
+                batch_labels = batch_labels.float() if multilabel else batch_labels.long()
+                batch_pred = model(blocks, batch_inputs)
+                acc = compute_acc(batch_pred, batch_labels)
+                test_accs.append(acc)
+
+        model.train()
+        return np.mean(val_accs), np.mean(test_accs)
+
+    def __call__(self, model, g, labels, val_nid, test_nid, batch_size, device):
+        start = time.time()
+        if isinstance(self.fanout, list) and self.fanout[0] > 0:
+            val_acc, test_acc = self.sample_evaluate(model, g, labels, val_nid, test_nid, batch_size, self.fanout, device)
+        else:
+            val_acc, test_acc = self.full_evaluate(model, g, labels, val_nid, test_nid, batch_size, device)
+
+        if val_acc > self.best_val_acc:
+            self.best_val_acc = val_acc
+            self.best_test_acc = test_acc
+        print('Best Eval Acc {:.4f} Test Acc {:.4f}'.format(self.best_val_acc, self.best_test_acc))
 
 def load_subtensor(feats, labels, seeds, input_nodes, device):
     """
@@ -235,6 +297,8 @@ def run(args, device, data):
                  args.batch_size / number_of_nodes,args.IS)
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
+    eval_fanout = [int(fanout) if int(fanout) > 0 else -1 for fanout in args.eval_fan_out.split(',')]
+    evaluate = FindBestEvaluator(eval_fanout)
 
     multilabel = len(labels.shape) > 1 and labels.shape[-1] > 1
     if multilabel:
@@ -247,8 +311,6 @@ def run(args, device, data):
     # Training loop
     avg = 0
     iter_tput = []
-    best_eval_acc = 0
-    best_test_acc = 0
     keys = ['Loss', 'Train Acc', 'Test Acc', 'Eval Acc']
     history = dict(zip(keys, ([] for _ in keys)))
     fanout= [int(fanout) for fanout in args.fan_out.split(',')]
@@ -314,7 +376,8 @@ def run(args, device, data):
                     A[A==0]=1
   
             # Load the input features as well as output labels
-            batch_inputs, batch_labels = load_subtensor(cached_data, labels, seeds, input_nodes, device)
+            batch_inputs, batch_labels = load_subtensor(cached_data if args.buffer_size > 0 else feats,
+                                                        labels, seeds, input_nodes, device)
             batch_labels = batch_labels.float() if multilabel else batch_labels.long()
             if args.buffer_size != 0 and args.IS == 1:
                 batch_pred  = model(blocks, batch_inputs,A.to(device))
@@ -344,16 +407,7 @@ def run(args, device, data):
         if epoch >= 5:
             avg += toc - tic
         if epoch % args.eval_every == 0 and epoch != 0:
-            eval_acc, test_acc, pred = evaluate(model, g, labels, val_nid, test_nid, args.val_batch_size, device)
-            if args.save_pred:
-                np.savetxt(args.save_pred + '%02d' % epoch, pred.argmax(1).cpu().numpy(), '%d')
-            print('Eval Acc {:.4f}'.format(eval_acc))
-            if eval_acc > best_eval_acc:
-                best_eval_acc = eval_acc
-                best_test_acc = test_acc
-            print('Best Eval Acc {:.4f} Test Acc {:.4f}'.format(best_eval_acc, best_test_acc))
-            history['Test Acc'].append(test_acc)
-            history['Eval Acc'].append(eval_acc)
+            evaluate(model, g, labels, val_nid, test_nid, args.eval_batch_size, device)
 
     print('Avg epoch time: {}'.format(avg / (epoch - 4)))
     epochs = range(args.num_epochs)
@@ -381,7 +435,7 @@ def run(args, device, data):
         args.buffer_rs_every) +'.json', "w")
     f.write(json_r)
     f.close()
-    return best_test_acc
+    return evaluate.best_test_acc
 
 
 if __name__ == '__main__':
@@ -393,8 +447,9 @@ if __name__ == '__main__':
     argparser.add_argument('--num-hidden', type=int, default=256)
     argparser.add_argument('--num-layers', type=int, default=3)
     argparser.add_argument('--fan-out', type=str, default='5,10,15')
+    argparser.add_argument('--eval-fan-out', type=str, default='15,15,15')
     argparser.add_argument('--batch-size', type=int, default=1000)
-    argparser.add_argument('--val-batch-size', type=int, default=10000)
+    argparser.add_argument('--eval-batch-size', type=int, default=10000)
     argparser.add_argument('--log-every', type=int, default=20)
     argparser.add_argument('--eval-every', type=int, default=1)
     argparser.add_argument('--lr', type=float, default=0.003)
