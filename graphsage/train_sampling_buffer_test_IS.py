@@ -20,7 +20,7 @@ from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
 import json
 import matplotlib.pyplot as plt
 from pyinstrument import Profiler
-import sklearn.metrics as skm
+from sklearn.metrics import f1_score
 
 epsilon = 1 - math.log(2)
 
@@ -127,8 +127,10 @@ def compute_acc1(pred, labels):
 def compute_acc(logits, labels):
     multilabel = len(labels.shape) > 1 and labels.shape[-1] > 1
     if multilabel:
-        return skm.average_precision_score(labels.detach().cpu().numpy(),
-                logits.detach().cpu().numpy())
+        pred_labels = nn.Sigmoid()(logits.detach())
+        pred_labels[pred_labels > 0.5] = 1
+        pred_labels[pred_labels <= 0.5] = 0
+        return f1_score(labels.cpu().numpy(), pred_labels.cpu().numpy(), average="micro")
     else:
         return compute_acc1(logits, labels)
 
