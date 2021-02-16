@@ -95,7 +95,7 @@ class SAGE(nn.Module):
                 g,
                 th.arange(g.number_of_nodes()),
                 sampler,
-                batch_size=args.batch_size * 10,
+                batch_size=args.eval_batch_size,
                 shuffle=False,
                 drop_last=False,
                 num_workers=args.num_workers)
@@ -488,13 +488,36 @@ if __name__ == '__main__':
         if 'oag' in args.dataset:
             labels = graph.ndata['field']
             graph.ndata['feat'] = graph.ndata['emb']
+
+            # Split the dataset into training, validation and testing
             label_sum = labels.sum(1)
             valid_labal_idx = th.nonzero(label_sum > 0, as_tuple=True)[0]
-            train_size = int(len(valid_labal_idx) * 0.43)
-            val_size = int(len(valid_labal_idx) * 0.05)
+            train_size = int(len(valid_labal_idx) * 0.80)
+            val_size = int(len(valid_labal_idx) * 0.10)
             test_size = len(valid_labal_idx) - train_size - val_size
             train_idx, val_idx, test_idx = valid_labal_idx[th.randperm(len(valid_labal_idx))].split([train_size, val_size, test_size])
+
+            # Remove infrequent labels. Otherwise, some of the labels will not have instances
+            # in the training, validation or test set.
+            label_filter = labels[train_idx].sum(0) > 100
+            label_filter = th.logical_and(label_filter, labels[val_idx].sum(0) > 100)
+            label_filter = th.logical_and(label_filter, labels[test_idx].sum(0) > 100)
+            labels = labels[:,label_filter]
             n_classes = labels.shape[1]
+
+            # Adjust training, validation and testing set to make sure all paper nodes
+            # in these sets have labels.
+            train_idx = train_idx[labels[train_idx].sum(1) > 0]
+            val_idx = val_idx[labels[val_idx].sum(1) > 0]
+            test_idx = test_idx[labels[test_idx].sum(1) > 0]
+            # All labels have instances.
+            assert np.all(labels[train_idx].sum(0).numpy() > 0)
+            assert np.all(labels[val_idx].sum(0).numpy() > 0)
+            assert np.all(labels[test_idx].sum(0).numpy() > 0)
+            # All instances have labels.
+            assert np.all(labels[train_idx].sum(1).numpy() > 0)
+            assert np.all(labels[val_idx].sum(1).numpy() > 0)
+            assert np.all(labels[test_idx].sum(1).numpy() > 0)
         else:
             labels = graph.ndata['label']
             train_idx = th.nonzero(graph.ndata['train_mask'], as_tuple=True)[0]
