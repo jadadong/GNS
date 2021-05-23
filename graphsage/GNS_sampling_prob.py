@@ -59,23 +59,22 @@ class SAGE(nn.Module):
         h = x
 
         for l, (layer, block) in enumerate(zip(self.layers, blocks)):
-          
-            if 'cached' in block.edges['_E'].data:
-                cache = block.edges['_E'].data['cached']
-                eid_ =  block.edges['_E'].data[dgl.EID]
+            if 'cached' in block.edata:
+                cache = block.edata['cached']
+                eid_ =  block.edata[dgl.EID]
                 cache_edge = eid_[(cache==1).nonzero()]
                 x_s,x_d = block.find_edges(th.reshape(cache_edge.to(th.int32),[len(cache_edge),]))
 
 
-                sample_pro = th.true_divide(in_degree.cpu(),self.fanout[l])
+                sample_pro = th.true_divide(in_degree, self.fanout[l])
                 c = th.reshape( sample_pro[x_d.long()],[len(x_d),1])
                 c[c> 5] = 5
                 c[c<1] = 1
 
-                p_product = th.ones(h.shape)
+                p_product = th.ones(h.shape, device=c.device)
                 p_product[x_s.long()] = c
 
-                h =th.mul(p_product.to(device),h).float()
+                h =th.mul(p_product, h).float()
 
                 
     
