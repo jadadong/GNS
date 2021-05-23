@@ -20,8 +20,19 @@ Available in [DGL](https://github.com/dmlc/dgl) library
 Results
 -------
 
-
 ### Training
+
+Check out a customized DGL from [here](https://github.com/zheng-da/dgl/tree/new_sampling).
+
+```
+git clone https://github.com/zheng-da/dgl.git
+cd dgl
+git checkout new_sampling
+```
+
+Follow the instruction [here](https://doc.dgl.ai/install/index.html) to install DGL from source.
+
+The following commands train GraphSage with GNS.
 
 ```bash
 python3 GNS_sampling_prob.py      # training on OAG-paper, OGBN-products and OGBN-Papers100M
