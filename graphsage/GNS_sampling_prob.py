@@ -21,6 +21,7 @@ import json
 import matplotlib.pyplot as plt
 from pyinstrument import Profiler
 import sklearn.metrics as skm
+import pdb
 
 epsilon = 1 - math.log(2)
 
@@ -55,21 +56,25 @@ class SAGE(nn.Module):
         self.batch_size = batch_size
         self.IS = IS
     # for importance sampling, use the fanout and dst_in_degrees
-    def forward(self, blocks, x,in_degree =None):
+    def forward(self, blocks, x,A =None):
         h = x
 
-        for l, (layer, block) in enumerate(zip(self.layers, blocks)):
-            if 'cached' in block.edata:
+        for l_num, (layer, block) in enumerate(zip(self.layers, blocks)):
+            if 'cached' in block.edata and A:
                 cache = block.edata['cached']
                 eid_ =  block.edata[dgl.EID]
+                
                 cache_edge = eid_[(cache==1).nonzero()]
                 x_s,x_d = block.find_edges(th.reshape(cache_edge.to(th.int32),[len(cache_edge),]))
 
-
-                sample_pro = th.true_divide(in_degree, self.fanout[l])
+#                pdb.set_trace()
+                sample_pro = A[l_num]
+               
+                sample_pro = th.reshape(A[l_num],[len(sample_pro),])
+               
                 c = th.reshape( sample_pro[x_d.long()],[len(x_d),1])
-                c[c> 5] = 5
-                c[c<1] = 1
+#                c[c> 5] = 5
+                c[c<0.5] = 0.5
 
                 p_product = th.ones(h.shape, device=c.device)
                 p_product[x_s.long()] = c
@@ -82,10 +87,9 @@ class SAGE(nn.Module):
 
          
             h = layer(block, (h, h_dst))
-            if self.buffer_size !=0 and self.IS==1 and layer == 0:
-               h = th.mul(A.repeat(len(h.T), 1).reshape(len(h), len(h.T)), h)
+            
           
-            if l != len(self.layers) - 1:
+            if l_num != len(self.layers) - 1:
                 h = self.activation(h)
                 h = self.dropout(h)
         return h
@@ -374,10 +378,10 @@ def run(args, device, data):
             if args.buffer_size != 0 and args.IS == 1:
                 fanouts = [int(fanout) for fanout in args.fan_out.split(',')]
                 batchsize = blocks[-1].num_dst_nodes()
-                A = th.ones(batchsize, 1, dtype=th.float32, device=device) * (batchsize/number_of_nodes)/args.buffer_size
-                for layer, block in reversed(list(enumerate(blocks))):
-                    if layer ==0:
-                        break
+                A_final = []
+                
+                for layer, block in enumerate(blocks):
+                    
                     dst_id = block.dstdata.__getitem__('_ID').long()
                     srcnode_id, dstnode_id = block.edges()
                     i_i = th.stack([srcnode_id.long(), dstnode_id.long()])
@@ -385,19 +389,23 @@ def run(args, device, data):
                                    in_degree_all_nodes[dst_id[dstnode_id.long()]])
                     value[value > 1] = 1
                     v = value
+                    
+                    A = th.reshape(prob[dst_id],[block.num_dst_nodes(),1]).to(device).type(th.float32)
+                    
                     A_temp = th.sparse.FloatTensor(i_i, v, th.Size([block.num_src_nodes(), block.num_dst_nodes()]))
                     A = th.sparse.mm(A_temp, A)
-                    A[A>1/(avd*args.buffer_size)]=1/(avd*args.buffer_size)
+                    #A[A>1/(avd*args.buffer_size)]=1/(avd*args.buffer_size)
                     A[A==0]=1
+                    A_final.append(A)
   
             # Load the input features as well as output labels
             batch_inputs, batch_labels = load_subtensor(cached_data if args.buffer_size > 0 else feats,
                                                         labels, seeds, input_nodes, device)
             batch_labels = batch_labels.float() if multilabel else batch_labels.long()
             if args.buffer_size != 0 and args.IS == 1:
-                batch_pred  = model(blocks, batch_inputs,A.to(device))
+                batch_pred  = model(blocks, batch_inputs,A_final)
             else:
-                batch_pred = model(blocks, batch_inputs,g.in_degrees())
+                batch_pred = model(blocks, batch_inputs)
 
             loss = loss_func(batch_pred, batch_labels)
             optimizer.zero_grad()
