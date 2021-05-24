@@ -35,7 +35,10 @@ Follow the instruction [here](https://doc.dgl.ai/install/index.html) to install 
 The following commands train GraphSage with GNS.
 
 ```bash
-python3 GNS_sampling_prob.py      # training on OAG-paper, OGBN-products and OGBN-Papers100M
-python3 GNS_yelp_amazon.py   # training on Yelp and Amazon
+python3 GNS_sampling_prob.py --dataset ogbn-products    # training on OGBN-products
+python3 GNS_sampling_prob.py --dataset oag_max_paper.dgl     # training on OAG-paper, OGBN-products and OGBN-Papers100M
+python3 GNS_sampling_prob.py --dataset ogbn-papers100M   # training on OGBN-Papers100M
+python3 GNS_yelp_amazon.py --dataset yelp   # training on Yelp
+python3 GNS_yelp_amazon.py --dataset amazon   # training on Amazon
 ```
 
