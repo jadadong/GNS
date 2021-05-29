@@ -428,6 +428,9 @@ def run(args, device, data):
     for epoch in range(args.num_epochs):
         profiler = Profiler()
         profiler.start()
+        #num_input_nodes = 0
+        #num_cached_nodes = 0
+        #cache_bool_idx = th.zeros(g.number_of_nodes())
         if epoch % args.buffer_rs_every == 0:
             if args.buffer_size != 0:
                 # initial the buffer
@@ -436,6 +439,7 @@ def run(args, device, data):
                 #            args.buffer = np.random.permutation(num_nodes)[:num_sample_nodes]
                 buffer_nodes = np.random.choice(num_nodes, num_sample_nodes, replace=False,
                                                p=prob)
+                #cache_bool_idx[buffer_nodes] = 1
                 cached_data = CachedData(feats, buffer_nodes, device)
             sampler = dgl.dataloading.MultiLayerNeighborSampler(min_fanout, max_fanout, buffer_nodes, args.buffer_size, g)
             dataloader = dgl.dataloading.NodeDataLoader(
@@ -456,6 +460,8 @@ def run(args, device, data):
             # Load the input features as well as output labels
 
             blocks = [block.int().to(device) for block in blocks]
+            #num_input_nodes += len(input_nodes)
+            #num_cached_nodes += th.sum(cache_bool_idx[input_nodes])
 
             if args.buffer_size != 0 and args.IS == 1:
                 fanouts = [int(fanout) for fanout in args.fan_out.split(',')]
@@ -508,6 +514,7 @@ def run(args, device, data):
             tic_step = time.time()
 
         history['Train Acc'].append(acc.item())
+        #print('inputs: {:.3f}, cached: {:.3f}'.format(num_input_nodes / (step + 1), num_cached_nodes / (step + 1)))
 
         toc = time.time()
         print('Epoch Time(s): {:.4f}'.format(toc - tic))
@@ -575,10 +582,10 @@ if __name__ == '__main__':
     argparser = argparse.ArgumentParser("multi-gpu training")
     argparser.add_argument('--gpu', type=int, default=0,
                            help="GPU device ID. Use -1 for CPU training")
-    argparser.add_argument('--IS', type=int, default=0)
+    argparser.add_argument('--IS', type=int, default=1)
     argparser.add_argument('--dataset', type=str, default='amazon')
     argparser.add_argument('--num-epochs', type=int, default=10)
-    argparser.add_argument('--num-hidden', type=int, default=256)
+    argparser.add_argument('--num-hidden', type=int, default=512)
     argparser.add_argument('--num-layers', type=int, default=3)
     argparser.add_argument('--fan-out', type=str, default='5,10,15')
     argparser.add_argument('--eval-fan-out', type=str, default='15,15,15')
