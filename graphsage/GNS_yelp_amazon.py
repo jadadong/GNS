@@ -123,12 +123,12 @@ def load_data(prefix, normalize=True):
                             for test nodes. The value is the list of IDs of nodes belonging to
                             the train/val/test sets.
     """
-    adj_full = scipy.sparse.load_npz('/home/ubuntu/workspace/{}/adj_full.npz'.format(prefix)).astype(np.bool)
+    adj_full = scipy.sparse.load_npz('/home/ubuntu/{}/adj_full.npz'.format(prefix)).astype(np.bool)
     #    adj_full = scipy.sparse.load_npz('/home/ubuntu/workspace/amazon 2/adj_full.npz').astype(np.bool)
-    adj_train = scipy.sparse.load_npz('/home/ubuntu/workspace/{}/adj_train.npz'.format(prefix)).astype(np.bool)
-    role = json.load(open('/home/ubuntu/workspace/{}/role.json'.format(prefix)))
-    feats = np.load('/home/ubuntu/workspace/{}/feats.npy'.format(prefix))
-    class_map = json.load(open('/home/ubuntu/workspace/{}/class_map.json'.format(prefix)))
+    adj_train = scipy.sparse.load_npz('/home/ubuntu/{}/adj_train.npz'.format(prefix)).astype(np.bool)
+    role = json.load(open('/home/ubuntu/{}/role.json'.format(prefix)))
+    feats = np.load('/home/ubuntu/{}/feats.npy'.format(prefix))
+    class_map = json.load(open('/home/ubuntu/{}/class_map.json'.format(prefix)))
     class_map = {int(k): v for k, v in class_map.items()}
     assert len(class_map) == feats.shape[0]
     # ---- normalize feats ----
@@ -514,8 +514,8 @@ def run(args, device, data):
         if epoch >= 5:
             avg += toc - tic
         if epoch % args.eval_every == 0 and epoch != 0:
-            sampler_test = dgl.dataloading.MultiLayerNeighborSampler(
-                [60, 60, 60], args.buffer, args.buffer_size, g)
+            fanout = [60, 60, 60]
+            sampler_test = dgl.dataloading.MultiLayerNeighborSampler(fanout, fanout, None, 0, g)
 
             test_dataloader = dgl.dataloading.NodeDataLoader(
                 g,
@@ -608,7 +608,7 @@ if __name__ == '__main__':
 
     #    data = load_data(args)
     print('loading graph')
-    adj_full, adj_train, feats, class_map, role = load_data('yelp')
+    adj_full, adj_train, feats, class_map, role = load_data(args.dataset)
     adj_full, adj_train, feats, class_arr, role = process_graph_data(adj_full, adj_train, feats, class_map, role)
 
     g = from_scipy(adj_full)
