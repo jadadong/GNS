@@ -531,6 +531,7 @@ def run(args, device, data):
 
     # Compute the node sampling probability.
     prob = np.divide(in_degree_all_nodes, sum(in_degree_all_nodes))
+    prob_gpu = th.tensor(prob).to(device)
 
     print('create the model')
     avd = int(sum(in_degree_all_nodes) // number_of_nodes)
@@ -580,7 +581,7 @@ def run(args, device, data):
                 buffer_nodes = np.unique(buffer_nodes)
                 cached_data = CachedData(feats, buffer_nodes, device)
                 cached_g = dgl.out_subgraph(g, buffer_nodes)
-                cached_in_degree = cached_g.in_degrees()
+                cached_in_degree = cached_g.in_degrees().to(device)
             sampler = dgl.dataloading.MultiLayerNeighborSampler(min_fanout, max_fanout, buffer_nodes, args.buffer_size, g)
             dataloader = dgl.dataloading.NodeDataLoader(
                 g,
@@ -617,11 +618,11 @@ def run(args, device, data):
 
                     N = in_degree_all_nodes[dst]
                     cached_N = cached_in_degree[dst]
-                    sample_prob = 1 - np.power(1 - prob[src],num_sample_nodes)
-                    prob2 = max_fanout[l_num] / th.minimum(cached_N, th.ones(len(cached_N)) * max_fanout[l_num])
+                    sample_prob = 1 - th.pow(1 - prob_gpu[src], num_sample_nodes)
+                    prob2 = max_fanout[l_num] / th.minimum(cached_N, th.ones(len(cached_N), device=device) * max_fanout[l_num])
                     sample_prob = sample_prob * prob2
 
-                    block.edata['prob'] = (1 / (sample_prob.to(device) * N)).float()
+                    block.edata['prob'] = (1 / (sample_prob * N)).float()
                     coefficient = block.edata['prob']
 #                    coefficient[coefficient>5] = 5
                     block.edata['prob'] = coefficient
