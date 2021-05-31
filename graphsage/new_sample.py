@@ -228,7 +228,8 @@ class SAGEConv(nn.Module):
             # Message Passing
             if self._aggre_type == 'mean':
                 graph.srcdata['h'] = self.fc_neigh(feat_src) if lin_before_mp else feat_src
-                graph.update_all(msg_fn, fn.mean('m', 'neigh'))
+                reduce_fn = fn.mean('m', 'neigh') if edge_weight is None else fn.sum('m', 'neigh')
+                graph.update_all(msg_fn, reduce_fn)
                 h_neigh = graph.dstdata['neigh']
                 if not lin_before_mp:
                     h_neigh = self.fc_neigh(h_neigh)
@@ -310,7 +311,7 @@ class SAGE(nn.Module):
 
         for l_num, (layer, block) in enumerate(zip(self.layers, blocks)):
 
-            if IS:
+            if IS and l_num == 0:
 
                 h_dst = h[:block.number_of_dst_nodes()]
                 h = layer(block, (h, h_dst),edge_weight=block.edata['prob'])
