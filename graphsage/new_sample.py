@@ -577,7 +577,7 @@ def run(args, device, data):
                 num_nodes = g.num_nodes()
                 num_sample_nodes = int(args.buffer_size * num_nodes)
                 buffer_nodes = np.random.choice(num_nodes, num_sample_nodes, replace=True, p=prob)
-                buffer = np.unique(buffer_nodes)
+                buffer_nodes = np.unique(buffer_nodes)
                 cached_data = CachedData(feats, buffer_nodes, device)
             sampler = dgl.dataloading.MultiLayerNeighborSampler(min_fanout, max_fanout, buffer_nodes, args.buffer_size,
                                                                 g)
