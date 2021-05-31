@@ -579,8 +579,9 @@ def run(args, device, data):
                 buffer_nodes = np.random.choice(num_nodes, num_sample_nodes, replace=True, p=prob)
                 buffer_nodes = np.unique(buffer_nodes)
                 cached_data = CachedData(feats, buffer_nodes, device)
-            sampler = dgl.dataloading.MultiLayerNeighborSampler(min_fanout, max_fanout, buffer_nodes, args.buffer_size,
-                                                                g)
+                cached_g = dgl.out_subgraph(g, buffer_nodes)
+                cached_in_degree = cached_g.in_degrees()
+            sampler = dgl.dataloading.MultiLayerNeighborSampler(min_fanout, max_fanout, buffer_nodes, args.buffer_size, g)
             dataloader = dgl.dataloading.NodeDataLoader(
                 g,
                 train_nid,
@@ -603,10 +604,6 @@ def run(args, device, data):
             blocks = [blk.int().to(device) for blk in blocks]
             dst_in_dgrees = []
 
-            if args.buffer_size != 0 and args.IS == 1:
-                fanouts = [int(fanout) for fanout in args.fan_out.split(',')]
-                batchsize = blocks[-1].num_dst_nodes()
-
             # Load the input features as well as output labels
             batch_inputs, batch_labels = load_subtensor(cached_data if args.buffer_size > 0 else feats,
                                                         labels, seeds, input_nodes, device)
@@ -619,8 +616,10 @@ def run(args, device, data):
                     src = block.srcdata[dgl.NID][src.long()]
 
                     N = in_degree_all_nodes[dst]
+                    cached_N = cached_in_degree[dst]
                     sample_prob = 1 - np.power(1 - prob[src],num_sample_nodes)
-
+                    prob2 = max_fanout[l_num] / th.minimum(cached_N, th.ones(len(cached_N)) * max_fanout[l_num])
+                    sample_prob = sample_prob * prob2
 
                     block.edata['prob'] = (1 / (sample_prob.to(device) * N)).float()
                     coefficient = block.edata['prob']
