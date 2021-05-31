@@ -59,7 +59,7 @@ class SAGE(nn.Module):
         h = x
 
         for l, (layer, block) in enumerate(zip(self.layers, blocks)):
-            if 'cached' in block.edata:
+            if 'cached' in block.edata and in_degree is not None:
                 cache = block.edata['cached']
                 eid_ =  block.edata[dgl.EID]
                 cache_edge = eid_[(cache==1).nonzero()]
@@ -397,7 +397,7 @@ def run(args, device, data):
             if args.buffer_size != 0 and args.IS == 1:
                 batch_pred  = model(blocks, batch_inputs,A.to(device))
             else:
-                batch_pred = model(blocks, batch_inputs,g.in_degrees())
+                batch_pred = model(blocks, batch_inputs)
 
             loss = loss_func(batch_pred, batch_labels)
             optimizer.zero_grad()
