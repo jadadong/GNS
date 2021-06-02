@@ -771,7 +771,6 @@ def run(args, device, data):
             avg += toc - tic
         if epoch % args.eval_every == 0 and epoch != 0:
             sampler_test =  dgl.dataloading.MultiLayerNeighborSampler(min_fanout, max_fanout, buffer_nodes, args.buffer_size, g)
-
             test_dataloader = dgl.dataloading.NodeDataLoader(
                 g,
                 test_nid,
@@ -781,14 +780,14 @@ def run(args, device, data):
                 drop_last=False,
                 num_workers=args.num_workers)
             model.eval()
-            test_acc = []
+            test_acc  =[]
             for input_nodes, seeds, blocks in tqdm.tqdm(test_dataloader):
-                blocks = [blk.int().to(device) for blk in blocks]
-                batch_inputs = g.ndata['feat'][input_nodes].to(device)
-                batch_labels = blocks[-1].dstdata['label'].to(device)
-                batch_pred = model(blocks, batch_inputs)
-
-                test_acc.append(calc_f1(batch_pred, batch_labels))
+                            blocks = [blk.int().to(device) for blk in blocks]
+                            batch_inputs = g.ndata['feat'][input_nodes].to(device)
+                            batch_labels = labels[seeds].to(device)
+                            batch_pred = model(blocks, batch_inputs)
+                            
+                            test_acc.append( calc_f1(batch_pred, batch_labels) )
 
             print('Test Acc {:.4f}'.format(np.mean(test_acc)))
             #            history['Test Acc'].append(test_acc.item())
@@ -831,7 +830,7 @@ if __name__ == '__main__':
     argparser.add_argument('--gpu', type=int, default=0,
                            help="GPU device ID. Use -1 for CPU training")
     argparser.add_argument('--IS', type=int, default=1)
-    argparser.add_argument('--dataset', type=str, default='amazon')
+    argparser.add_argument('--dataset', type=str, default='yelp')
     argparser.add_argument('--num-epochs', type=int, default=10)
     argparser.add_argument('--num-hidden', type=int, default=512)
     argparser.add_argument('--num-layers', type=int, default=3)
@@ -898,4 +897,3 @@ if __name__ == '__main__':
     for i in range(10):
         test_accs.append(run(args, device, data))
         print('Average test accuracy:', np.mean(test_accs), '±', np.std(test_accs))
-
