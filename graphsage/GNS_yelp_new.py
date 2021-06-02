@@ -687,8 +687,6 @@ def run(args, device, data):
     print('start training')
 
     for epoch in range(args.num_epochs):
-        profiler = Profiler()
-        profiler.start()
         #num_input_nodes = 0
         #num_cached_nodes = 0
         #cache_bool_idx = th.zeros(g.number_of_nodes())
@@ -712,6 +710,8 @@ def run(args, device, data):
                 drop_last=False,
                 num_workers=args.num_workers)
 
+        profiler = Profiler()
+        profiler.start()
         tic = time.time()
 
         # Loop over the dataloader to sample the computation dependency graph as a list of
@@ -720,7 +720,7 @@ def run(args, device, data):
         for step, (input_nodes, seeds, blocks) in enumerate(dataloader):
             # Load the input features as well as output labels
 
-            blocks = [block.int().to(device) for block in blocks]
+            blocks = [block.to(device).int() for block in blocks]
             #num_input_nodes += len(input_nodes)
             #num_cached_nodes += th.sum(cache_bool_idx[input_nodes])
             batch_inputs = g.ndata['feat'][input_nodes].to(device)
@@ -739,10 +739,6 @@ def run(args, device, data):
                     sample_prob = sample_prob * prob2
 
                     block.edata['prob'] = (1 / (sample_prob * N)).float()
-                    coefficient = block.edata['prob']
-                    #                    coefficient[coefficient>5] = 5
-                    block.edata['prob'] = coefficient
-
                 batch_pred = model(blocks, batch_inputs, args.IS)
             else:
                 batch_pred = model(blocks, batch_inputs)
@@ -767,6 +763,9 @@ def run(args, device, data):
 
         toc = time.time()
         print('Epoch Time(s): {:.4f}'.format(toc - tic))
+        profiler.stop()
+        print(profiler.output_text(unicode=True, color=True))
+
         if epoch >= 5:
             avg += toc - tic
         if epoch % args.eval_every == 0 and epoch != 0:
@@ -867,6 +866,8 @@ if __name__ == '__main__':
     adj_full, adj_train, feats, class_arr, role = process_graph_data(adj_full, adj_train, feats, class_map, role)
 
     g = from_scipy(adj_full)
+    g = g.formats(['csc', 'csr'])
+    g.create_formats_()
     print('processing graph')
 
     features = feats
