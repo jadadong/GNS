@@ -124,13 +124,13 @@ def load_data(prefix, normalize=True):
                             for test nodes. The value is the list of IDs of nodes belonging to
                             the train/val/test sets.
     """
-    adj_full = scipy.sparse.load_npz('/home/ubuntu/workspace/{}/adj_full.npz'.format(prefix)).astype(np.bool)
+    adj_full = scipy.sparse.load_npz('/home/ubuntu/{}/adj_full.npz'.format(prefix)).astype(np.bool)
 #    adj_full = scipy.sparse.load_npz('/home/ubuntu/workspace/amazon 2/adj_full.npz').astype(np.bool)
-    adj_train = scipy.sparse.load_npz('/home/ubuntu/workspace/{}/adj_train.npz'.format(prefix)).astype(np.bool)
-    role = json.load(open('/home/ubuntu/workspace/{}/role.json'.format(prefix)))
+    adj_train = scipy.sparse.load_npz('/home/ubuntu/{}/adj_train.npz'.format(prefix)).astype(np.bool)
+    role = json.load(open('/home/ubuntu/{}/role.json'.format(prefix)))
 #    pdb.set_trace()
-    feats = np.load('/home/ubuntu/workspace/{}/feats.npy'.format(prefix))
-    class_map = json.load(open('/home/ubuntu/workspace/{}/class_map.json'.format(prefix)))
+    feats = np.load('/home/ubuntu/{}/feats.npy'.format(prefix))
+    class_map = json.load(open('/home/ubuntu/{}/class_map.json'.format(prefix)))
     class_map = {int(k): v for k, v in class_map.items()}
     assert len(class_map) == feats.shape[0]
     # ---- normalize feats ----
