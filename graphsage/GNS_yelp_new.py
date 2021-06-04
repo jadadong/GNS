@@ -466,15 +466,14 @@ class SAGE(nn.Module):
                 g,
                 th.arange(g.number_of_nodes()),
                 sampler,
-                batch_size=args.batch_size,
-                shuffle=True,
+                batch_size=args.batch_size * 10,
+                shuffle=False,
                 drop_last=False,
                 num_workers=args.num_workers)
 
             for input_nodes, output_nodes, blocks in tqdm.tqdm(dataloader):
-                block = blocks[0]
+                block = blocks[0].int().to(device)
 
-                block = block.int().to(device)
                 h = x[input_nodes].to(device)
                 h = layer(block, h)
                 if l != len(self.layers) - 1:
@@ -592,13 +591,12 @@ def evaluate(model, g, inputs, labels, val_nid, batch_size, device):
     output = pred[val_nid]
     return compute_acc(pred[val_nid], labels[val_nid]), compute_acc(pred[val_nid], labels[val_nid])
 
-
-def load_subtensor(g, seeds, input_nodes, device):
+def load_subtensor(feats, labels, seeds, input_nodes, device):
     """
     Copys features and labels of a set of nodes onto GPU.
     """
-    batch_inputs = g.ndata['features'][input_nodes].to(device)
-    batch_labels = g.ndata['labels'][seeds].to(device)
+    batch_inputs = feats[input_nodes].to(device)
+    batch_labels = labels[seeds].to(device)
     return batch_inputs, batch_labels
 
 def cross_entropy(x, labels):
@@ -673,7 +671,7 @@ def run(args, device, data):
     avg = 0
     iter_tput = []
     keys = ['Loss', 'Train Acc', 'Test Acc', 'Eval Acc', 'Test F1', 'Eval F1']
-    history = dict(zip(keys, ([] for _ in keys)))
+    #history = dict(zip(keys, ([] for _ in keys)))
     fanout= [int(fanout) for fanout in args.fan_out.split(',')]
     min_fanout = [f for f in fanout]
     max_fanout = [f for f in fanout]
@@ -697,6 +695,8 @@ def run(args, device, data):
                 num_sample_nodes = int(args.buffer_size * num_nodes)
                 buffer_nodes = np.random.choice(num_nodes, num_sample_nodes, replace=True, p=prob)
                 buffer_nodes = np.unique(buffer_nodes)
+                print('#sampled nodes: {}, cache size: {}'.format(num_sample_nodes, len(buffer_nodes)))
+                #cache_bool_idx[buffer_nodes] = 1
                 cached_data = CachedData(feats, buffer_nodes, device)
                 cached_g = dgl.out_subgraph(g, buffer_nodes)
                 cached_in_degree = cached_g.in_degrees().to(device)
@@ -723,8 +723,9 @@ def run(args, device, data):
             blocks = [block.to(device).int() for block in blocks]
             #num_input_nodes += len(input_nodes)
             #num_cached_nodes += th.sum(cache_bool_idx[input_nodes])
-            batch_inputs = g.ndata['feat'][input_nodes].to(device)
-            batch_labels = labels[seeds].to(device)
+            # Load the input features as well as output labels
+            batch_inputs, batch_labels = load_subtensor(cached_data if args.buffer_size > 0 else g.ndata['feat'],
+                                                        labels, seeds, input_nodes, device)
             if args.buffer_size != 0 and args.IS == 1:
                 for l_num, block in enumerate(blocks):
                     src, dst = block.edges()
@@ -748,7 +749,7 @@ def run(args, device, data):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            history['Loss'].append(loss.item())
+            #history['Loss'].append(loss.item())
             iter_tput.append(len(seeds) / (time.time() - tic_step))
             if step % args.log_every == 0:
                 acc = compute_acc(batch_pred, batch_labels)
@@ -757,19 +758,20 @@ def run(args, device, data):
                     'Epoch {:05d} | Step {:05d} | Loss {:.4f} | Train Acc {:.4f} | Speed (samples/sec) {:.4f} | GPU {:.1f} MiB'.format(
                         epoch, step, loss.item(), acc.item(), np.mean(iter_tput[3:]), gpu_mem_alloc))
             tic_step = time.time()
-
-        history['Train Acc'].append(acc.item())
+        profiler.stop()
+        print(profiler.output_text(unicode=True, color=True))
         #print('inputs: {:.3f}, cached: {:.3f}'.format(num_input_nodes / (step + 1), num_cached_nodes / (step + 1)))
+
+        #history['Train Acc'].append(acc.item())
 
         toc = time.time()
         print('Epoch Time(s): {:.4f}'.format(toc - tic))
-        profiler.stop()
-        print(profiler.output_text(unicode=True, color=True))
 
         if epoch >= 5:
             avg += toc - tic
         if epoch % args.eval_every == 0 and epoch != 0:
-            sampler_test =  dgl.dataloading.MultiLayerNeighborSampler(min_fanout, max_fanout, buffer_nodes, args.buffer_size, g)
+            fanout = [60, 60, 60]
+            sampler_test = dgl.dataloading.MultiLayerNeighborSampler(fanout, fanout, None, 0, g)
             test_dataloader = dgl.dataloading.NodeDataLoader(
                 g,
                 test_nid,
@@ -781,12 +783,12 @@ def run(args, device, data):
             model.eval()
             test_acc  =[]
             for input_nodes, seeds, blocks in tqdm.tqdm(test_dataloader):
-                            blocks = [blk.int().to(device) for blk in blocks]
-                            batch_inputs = g.ndata['feat'][input_nodes].to(device)
-                            batch_labels = labels[seeds].to(device)
-                            batch_pred = model(blocks, batch_inputs)
-                            
-                            test_acc.append( calc_f1(batch_pred, batch_labels) )
+                blocks = [blk.int().to(device) for blk in blocks]
+                batch_inputs = g.ndata['feat'][input_nodes].to(device)
+                batch_labels = labels[seeds].to(device)
+                batch_pred = model(blocks, batch_inputs)
+
+                test_acc.append( calc_f1(batch_pred, batch_labels) )
 
             print('Test Acc {:.4f}'.format(np.mean(test_acc)))
             #            history['Test Acc'].append(test_acc.item())
