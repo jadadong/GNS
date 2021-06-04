@@ -570,6 +570,9 @@ def run(args, device, data):
     buffer_nodes = None
     print('start training')
     for epoch in range(args.num_epochs):
+        #num_input_nodes = 0
+        #num_cached_nodes = 0
+        #cache_bool_idx = th.zeros(g.number_of_nodes())
         profiler = Profiler()
         profiler.start()
         if epoch % args.buffer_rs_every == 0:
@@ -579,6 +582,8 @@ def run(args, device, data):
                 num_sample_nodes = int(args.buffer_size * num_nodes)
                 buffer_nodes = np.random.choice(num_nodes, num_sample_nodes, replace=True, p=prob)
                 buffer_nodes = np.unique(buffer_nodes)
+                print('#sampled nodes: {}, cache size: {}'.format(num_sample_nodes, len(buffer_nodes)))
+                #cache_bool_idx[buffer_nodes] = 1
                 cached_data = CachedData(feats, buffer_nodes, device)
                 cached_g = dgl.out_subgraph(g, buffer_nodes)
                 cached_in_degree = cached_g.in_degrees().to(device)
@@ -597,21 +602,19 @@ def run(args, device, data):
         # Loop over the dataloader to sample the computation dependency graph as a list of
         # blocks.
         num_batches = 0
+        tic_step = time.time()
         for step, (input_nodes, seeds, blocks) in enumerate(dataloader):
             num_batches += 1
-            tic_step = time.time()
-
+            blocks = [blk.to(device).int() for blk in blocks]
+            #num_input_nodes += len(input_nodes)
+            #num_cached_nodes += th.sum(cache_bool_idx[input_nodes])
             # copy block to gpu
-            blocks = [blk.int().to(device) for blk in blocks]
-            dst_in_dgrees = []
-
             # Load the input features as well as output labels
             batch_inputs, batch_labels = load_subtensor(cached_data if args.buffer_size > 0 else feats,
                                                         labels, seeds, input_nodes, device)
             batch_labels = batch_labels.float() if multilabel else batch_labels.long()
             if args.buffer_size != 0 and args.IS == 1:
-                for l_num,  block in enumerate(blocks):
-
+                for l_num, block in enumerate(blocks):
                     src, dst = block.edges()
                     dst = block.dstdata[dgl.NID][dst.long()]
                     src = block.srcdata[dgl.NID][src.long()]
@@ -619,14 +622,11 @@ def run(args, device, data):
                     N = in_degree_all_nodes[dst]
                     cached_N = cached_in_degree[dst]
                     sample_prob = 1 - th.pow(1 - prob_gpu[src], num_sample_nodes)
-                    prob2 = max_fanout[l_num] / th.minimum(cached_N, th.ones(len(cached_N), device=device) * max_fanout[l_num])
+                    prob2 = max_fanout[l_num] / th.minimum(cached_N,
+                                                           th.ones(len(cached_N), device=device) * max_fanout[l_num])
                     sample_prob = sample_prob * prob2
 
                     block.edata['prob'] = (1 / (sample_prob * N)).float()
-                    coefficient = block.edata['prob']
-#                    coefficient[coefficient>5] = 5
-                    block.edata['prob'] = coefficient
-
                 batch_pred = model(blocks, batch_inputs, args.IS)
             else:
                 batch_pred = model(blocks, batch_inputs)
@@ -643,8 +643,10 @@ def run(args, device, data):
                 print(
                     'Epoch {:05d} | Step {:05d} | Loss {:.4f} | Train Acc {:.4f} | Speed (samples/sec) {:.4f} | GPU {:.1f} MiB'.format(
                         epoch, step, loss.item(), acc, np.mean(iter_tput[3:]), gpu_mem_alloc))
+            tic_step = time.time()
         profiler.stop()
         print(profiler.output_text(unicode=True, color=True))
+        #print('inputs: {:.3f}, cached: {:.3f}'.format(num_input_nodes / (step + 1), num_cached_nodes / (step + 1)))
 
         history['Loss'].append(loss.item())
         history['Train Acc'].append(acc)
