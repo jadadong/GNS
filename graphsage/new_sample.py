@@ -724,14 +724,14 @@ if __name__ == '__main__':
         splitted_idx = data.get_idx_split()
         train_idx, val_idx, test_idx = splitted_idx['train'], splitted_idx['valid'], splitted_idx['test']
         graph, labels = data[0]
-        graph.create_formats_()
+        data = None
+        if args.dataset == 'ogbn-papers100M':
+            graph = dgl.add_reverse_edges(graph, copy_ndata=True)
         n_classes = len(th.unique(labels[th.logical_not(th.isnan(labels))]))
     else:
         print('load a prepared graph')
         data = dgl.load_graphs(args.dataset)[0]
         graph = data[0]
-        graph = graph.formats(['csr', 'csc'])
-        print('create csr and csc')
         if 'oag' in args.dataset:
             labels = graph.ndata['field']
             graph.ndata['feat'] = graph.ndata['emb']
@@ -749,6 +749,10 @@ if __name__ == '__main__':
             val_idx = th.nonzero(graph.ndata['val_mask'], as_tuple=True)[0]
             test_idx = th.nonzero(graph.ndata['test_mask'], as_tuple=True)[0]
             n_classes = len(th.unique(labels[th.logical_not(th.isnan(labels))]))
+    print('create csr and csc')
+    graph = graph.formats(['csc', 'csr'])
+    graph.create_formats_()
+    print('finish creating csr and csc')
 
     in_feats = graph.ndata['feat'].shape[1]
     # Pack data
