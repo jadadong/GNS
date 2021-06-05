@@ -716,6 +716,7 @@ def run(args, device, data):
 
         # Loop over the dataloader to sample the computation dependency graph as a list of
         # blocks.
+        model.train()
         tic_step = time.time()
         for step, (input_nodes, seeds, blocks) in enumerate(dataloader):
             # Load the input features as well as output labels
@@ -769,7 +770,8 @@ def run(args, device, data):
 
         if epoch >= 5:
             avg += toc - tic
-        if epoch % args.eval_every == 0 and epoch != 0:
+        if epoch % args.eval_every == 0 and epoch >= 5:
+            #evaluate(model, g, labels, val_nid, test_nid, args.eval_batch_size, device)
             fanout = [60, 60, 60]
             sampler_test = dgl.dataloading.MultiLayerNeighborSampler(fanout, fanout, None, 0, g)
             test_dataloader = dgl.dataloading.NodeDataLoader(
@@ -777,7 +779,7 @@ def run(args, device, data):
                 test_nid,
                 sampler_test,
                 batch_size=args.batch_size,
-                shuffle=True,
+                shuffle=False,
                 drop_last=False,
                 num_workers=args.num_workers)
             model.eval()
@@ -787,13 +789,12 @@ def run(args, device, data):
                 batch_inputs = g.ndata['feat'][input_nodes].to(device)
                 batch_labels = labels[seeds].to(device)
                 batch_pred = model(blocks, batch_inputs)
-
                 test_acc.append( calc_f1(batch_pred, batch_labels) )
 
             print('Test Acc {:.4f}'.format(np.mean(test_acc)))
             #            history['Test Acc'].append(test_acc.item())
             #            history['Eval Acc'].append(eval_acc.item())
-            history['Test F1'].append(test_acc)
+            #history['Test F1'].append(test_acc)
     #            history['Eval F1'].append(eval_f1)
     #    print('Avg epoch time: {}'.format(avg / (epoch - 4)))
     #    epochs = range(len(history['Eval F1']))
@@ -845,7 +846,7 @@ if __name__ == '__main__':
     argparser.add_argument('--eval-every', type=int, default=9)
     argparser.add_argument('--buffer_rs-every', type=int, default=1)
     argparser.add_argument('--lr', type=float, default=0.003)
-    argparser.add_argument('--dropout', type=float, default=0.5)
+    argparser.add_argument('--dropout', type=float, default=0)
     argparser.add_argument('--num-workers', type=int, default=4,
                            help="Number of sampling processes. Use 0 for no extra process.")
     argparser.add_argument('--inductive', action='store_true',
