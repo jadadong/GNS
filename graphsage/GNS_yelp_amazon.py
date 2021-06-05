@@ -451,6 +451,7 @@ def run(args, device, data):
 
         # Loop over the dataloader to sample the computation dependency graph as a list of
         # blocks.
+        model.train()
         tic_step = time.time()
         for step, (input_nodes, seeds, blocks) in enumerate(dataloader):
             # Load the input features as well as output labels
@@ -513,7 +514,7 @@ def run(args, device, data):
         print('Epoch Time(s): {:.4f}'.format(toc - tic))
         if epoch >= 5:
             avg += toc - tic
-        if epoch % args.eval_every == 0 and epoch != 0:
+        if epoch % args.eval_every == 0 and epoch >= 5:
             sampler_test = dgl.dataloading.MultiLayerNeighborSampler(
                 [60, 60, 60], args.buffer, args.buffer_size, g)
 
@@ -590,7 +591,7 @@ if __name__ == '__main__':
     argparser.add_argument('--eval-every', type=int, default=1)
     argparser.add_argument('--buffer_rs-every', type=int, default=1)
     argparser.add_argument('--lr', type=float, default=0.003)
-    argparser.add_argument('--dropout', type=float, default=0.5)
+    argparser.add_argument('--dropout', type=float, default=0)
     argparser.add_argument('--num-workers', type=int, default=4,
                            help="Number of sampling processes. Use 0 for no extra process.")
     argparser.add_argument('--inductive', action='store_true',
