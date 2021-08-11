@@ -49,7 +49,6 @@ these two sampling algorithms.
 * python >= 3.6.0
 * pytorch >= 1.6.0
 * dgl >=0.7.0
-* ogb >= 1.3.1
 * Numpy>=1.16.0
 * scipy >= 1.1.0
 * scikit-learn >= 0.19.1
