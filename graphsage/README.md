@@ -1,5 +1,5 @@
 
-Global Neighbor Sampling for Mixed CPU-GPU Training on Giant Graphs (GNS)
+[Global Neighbor Sampling for Mixed CPU-GPU Training on Giant Graphs (GNS)](https://arxiv.org/abs/2106.06150)
 
 Jialin Dong\*, [Da Zheng](https://zheng-da.github.io/)\*, [Lin F. Yang](http://drlinyang.net/), [Geroge Karypis](http://glaros.dtc.umn.edu/)
 
